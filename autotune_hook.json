@@ -1,0 +1,10 @@
+{
+  "_说明": "把 dump 出来的偏移填进 hooks，删掉这条注释。image 填镜像名（Unity 一般是 UnityFramework）",
+  "hooks": [
+    {
+      "image": "UnityFramework",
+      "offset": "0x0",
+      "kind": "raycast"
+    }
+  ]
+}
