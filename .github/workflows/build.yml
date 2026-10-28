@@ -1,0 +1,76 @@
+name: build-autotune
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 定位工程目录
+        id: locate
+        run: |
+          if [ -f Makefile ] && [ -f AutoTune.xm ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f AutoTune/Makefile ]; then
+            echo "dir=AutoTune" >> "$GITHUB_OUTPUT"
+          else
+            echo "在仓库里找不到 Makefile 和 AutoTune.xm。仓库根目录现在是："
+            ls -la
+            echo "请确认 AutoTune.xm / Makefile 已经上传到仓库根目录。"
+            exit 1
+          fi
+
+      - name: 安装签名工具 ldid
+        run: |
+          set -e
+          curl -fL -o /tmp/ldid https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_macosx_arm64 \
+            || curl -fL -o /tmp/ldid https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_macosx_x86_64
+          chmod +x /tmp/ldid
+          sudo mv /tmp/ldid /usr/local/bin/ldid
+          ldid -h 2>&1 | head -2 || true
+
+      - name: 安装 Theos
+        run: |
+          set -e
+          export THEOS="$RUNNER_WORKSPACE/theos"
+          rm -rf "$THEOS"
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+          test -f "$THEOS/vendor/lib/libsubstrate.tbd"
+          test -f "$THEOS/vendor/include/substrate.h"
+
+      - name: 编译
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: |
+          set -e
+          xcodebuild -version
+          make clean || true
+          make FINALPACKAGE=1 messages=yes
+          echo "=== 编译出来的动态库 ==="
+          find . -name '*.dylib' -not -path './.git/*'
+
+      - name: 收集产物
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: |
+          set -e
+          mkdir -p dist
+          find . -name '*.dylib' -not -path './.git/*' -exec cp -v {} dist/ \;
+          ls -la dist
+          test -f dist/AutoTune.dylib
+          file dist/AutoTune.dylib
+          lipo -info dist/AutoTune.dylib
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoTune-dylib
+          path: ${{ steps.locate.outputs.dir }}/dist/*.dylib
+          if-no-files-found: error
+          retention-days: 30
